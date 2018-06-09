@@ -43,13 +43,3 @@ def test_service(host):
 def test_socket(host):
     s = host.socket("tcp://127.0.0.1:9090")
     assert s.is_listening
-
-
-def test_version(host):
-    v = os.getenv('PROMETHEUS', DEFAULT_VERSION)
-    if int(v[0]) < 2:
-        out = host.run("/usr/local/bin/prometheus -version").stdout
-    else:
-        out = host.run("/usr/local/bin/prometheus --version").stderr
-    version = "prometheus, version " + v
-    assert version in out
