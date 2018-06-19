@@ -1,31 +1,82 @@
 ---
-- name: Gather variables for each operating system
-  include_vars: "{{ item }}"
-  with_first_found:
-    - "{{ ansible_distribution | lower }}.yml"
-    - "{{ ansible_os_family | lower }}.yml"
-  tags:
-    - always
 
-- include: preflight.yml
-  tags:
-    - always
+- name: make sure user for prometheus exists
+  user:
+    name: "{{ prometheus_user }}"
 
-- include: install.yml
-  become: true
-  tags:
-    - install
+- name: unarchive prometheus
+  unarchive:
+    remote_src: yes
+    dest: "{{ prometheus_install_dir | dirname }}"
+    src: "{{ prometheus_url }}"
+    creates: "{{ prometheus_install_dir }}/prometheus"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
 
-- include: configure.yml
-  become: true
-  tags:
-    - configure
+- name: create prometheus directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: 0755
+  with_items:
+    - "{{ prometheus_config_dir }}"
+    - "{{ prometheus_rules_dir }}"
+    - "{{ prometheus_db_dir }}"
+    - "{{ prometheus_log_dir }}"
+    - "{{ prometheus_config_dir }}/file_sd"
 
-- name: ensure prometheus service is started and enabled
-  become: true
-  systemd:
+- name: create systemd service unit
+  template:
+    src: prometheus.service.j2
+    dest: /etc/systemd/system/prometheus.service
+    owner: root
+    group: root
+    mode: 0644
+  when: ansible_service_mgr == 'systemd'
+  notify:
+    - service reenable
+    - restart prometheus
+
+- name: make sure prometheus is started
+  service:
     name: prometheus
     state: started
-    enabled: true
-  tags:
-    - run
+    enabled: yes
+
+- name: alerting rules file
+  template:
+    src: "prometheus.alert.rules.j2"
+    dest: "{{ prometheus_rules_dir }}/ansible_managed.rules"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: 0644
+    validate: "{{ prometheus_install_dir }}/promtool check rules %s"
+  when:
+    - prometheus_alertmanager_config != []
+    - prometheus_alert_rules != []
+  notify:
+    - reload prometheus
+
+- name: copy prometheus config
+  template:
+    src: "prometheus.yml.j2"
+    dest: "{{ prometheus_config_dir }}/prometheus.yml"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: 0644
+    validate: "{{ prometheus_install_dir }}/promtool check config %s"
+
+- name: configure prometheus static targets
+  copy:
+    content: |
+      #jinja2: lstrip_blocks: True
+      {{ item.value | to_nice_yaml(indent=2) }}
+    dest: "{{ prometheus_config_dir }}/file_sd/{{ item.key }}.yml"
+    force: true
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: 0644
+  with_dict: "{{ prometheus_targets }}"
+  when: prometheus_targets != {}

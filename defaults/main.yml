@@ -1,13 +1,27 @@
 ---
+
 prometheus_version: 2.3.0
+prometheus_release_name: "prometheus-{{ prometheus_version }}.linux-amd64"
+prometheus_url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/{{ prometheus_release_name }}.tar.gz"
+prometheus_service_reload: true
 
-prometheus_config_dir: /etc/prometheus
-prometheus_db_dir: /var/lib/prometheus
+prometheus_user: prometheus
+prometheus_group: prometheus
 
-prometheus_web_listen_address: "0.0.0.0:9090"
+prometheus_install_dir: "/opt/{{ prometheus_release_name }}"
+prometheus_rules_dir: "{{ prometheus_config_dir }}/rules"
+prometheus_log_dir: /opt/prometheus/log
+
+# This role is a simplified version of this one: https://github.com/cloudalchemy/ansible-prometheus
+# please follow the instruction in that link to properly set the following variables
+prometheus_config_dir: /opt/prometheus/config
+prometheus_db_dir: /opt/prometheus/data
+
+prometheus_web_listen_address: ":9090"
 prometheus_web_external_url: ''
 
-prometheus_storage_retention: "30d"
+prometheus_metrics_path: "/{{ ( prometheus_web_external_url + '/metrics' ) | regex_replace('^(.*://)?(.*?)/') }}"
+
 
 prometheus_config_flags_extra: {}
 # prometheus_config_flags_extra:
@@ -32,25 +46,26 @@ prometheus_global:
 
 prometheus_remote_write: []
 # prometheus_remote_write:
-#   - url: https://dev.kausal.co/prom/push
-#     basic_auth:
-#       password: FOO
+  # - url: <url>
+  #   basic_auth:
+  #     password: <pwd>
 
 prometheus_remote_read: []
 # prometheus_remote_read:
-#   - url: https://demo.cloudalchemy.org:9201/read
+#   - url: <url>
 #     basic_auth:
-#       password: FOO
+#       password: <pwd>
 
 prometheus_external_labels:
   environment: "{{ ansible_fqdn | default(ansible_host) | default(inventory_hostname) }}"
 
-prometheus_targets: {}
-#  node:
-#    - targets:
-#        - localhost:9100
-#      labels:
-#        env: test
+
+prometheus_targets:
+  node:
+    - targets:
+        - localhost:9100
+      labels:
+        env: test
 
 prometheus_scrape_configs:
   - job_name: "prometheus"
@@ -63,9 +78,6 @@ prometheus_scrape_configs:
       - files:
           - "{{ prometheus_config_dir }}/file_sd/node.yml"
 
-# Alternative config file name, searched in ansible templates path.
-prometheus_config_file: 'prometheus.yml.j2'
-
 prometheus_alert_rules:
   - alert: InstanceDown
     expr: "up == 0"
@@ -75,34 +87,3 @@ prometheus_alert_rules:
     annotations:
       description: "{% raw %}{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 5 minutes.{% endraw %}"
       summary: "{% raw %}Instance {{ $labels.instance }} down{% endraw %}"
-  - alert: CriticalCPULoad
-    expr: '(100 * (1 - avg(irate(node_cpu{job="node",mode="idle"}[5m])) BY (instance))) > 96'
-    for: 2m
-    labels:
-      severity: critical
-    annotations:
-      description: "{% raw %}{{ $labels.instance }} of job {{ $labels.job }} has Critical CPU load for more than 2 minutes.{% endraw %}"
-      summary: "{% raw %}Instance {{ $labels.instance }} - Critical CPU load{% endraw %}"
-  - alert: CriticalRAMUsage
-    expr: '(1 - ((node_memory_MemFree + node_memory_Buffers + node_memory_Cached) / node_memory_MemTotal)) * 100 > 98'
-    for: 5m
-    labels:
-      severity: critical
-    annotations:
-      description: "{% raw %}{{ $labels.instance }} has Critical Memory Usage more than 5 minutes.{% endraw %}"
-      summary: "{% raw %}Instance {{ $labels.instance }} has Critical Memory Usage{% endraw %}"
-  - alert: CriticalDiskSpace
-    expr: 'node_filesystem_free{job="node",filesystem!~"^/run(/|$)"} / node_filesystem_size{job="node"} < 0.1'
-    for: 4m
-    labels:
-      severity: critical
-    annotations:
-      description: "{% raw %}{{ $labels.instance }} of job {{ $labels.job }} has less than 10% space remaining.{% endraw %}"
-      summary: "{% raw %}Instance {{ $labels.instance }} - Critical disk space usage{% endraw %}"
-  - alert: RebootRequired
-    expr: "node_reboot_required > 0"
-    labels:
-      severity: warning
-    annotations:
-      description: "{% raw %}{{ $labels.instance }} requires a reboot.{% endraw %}"
-      summary: "{% raw %}Instance {{ $labels.instance }} - reboot required{% endraw %}"
